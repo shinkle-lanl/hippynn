@@ -212,14 +212,14 @@ class VelocityVerlet(VariableUpdater):
 
     def __init__(
         self,
-        force_key: str,
+        force_db_name: str,
         units_force: float = ase.units.eV,
         units_acc: float = ase.units.Ang / (1.0**2),
     ):
         """
         Parameters
         ----------
-        force_key : str
+        force_db_name : str
             key which will correspond to the force on the modified Variable
             in the HIPNN model output dictionary
         units_force : float, optional
@@ -231,7 +231,7 @@ class VelocityVerlet(VariableUpdater):
             amount of Ang/fs^2 equal to one in the units used for acceleration
             in the corresponding Variable, by default units.Ang/(1.0 ** 2) = 1
         """
-        self.force_key = force_key
+        self.force_db_name = force_db_name
         self.force_factor = units_force / units_acc
 
     def pre_step(self, dt):
@@ -261,7 +261,7 @@ class VelocityVerlet(VariableUpdater):
         model_outputs : dict
             dictionary of HIPNN model outputs
         """
-        self.variable.data["force"] = model_outputs[self.force_key].to(self.variable.device)
+        self.variable.data["force"] = model_outputs[self.force_db_name].to(self.variable.device)
         if len(self.variable.data["force"].shape) == len(self.variable.data["mass"].shape):
             self.variable.data["acceleration"] = self.variable.data["force"].detach() / self.variable.data["mass"] * self.force_factor
         else:
@@ -280,7 +280,7 @@ class LangevinDynamics(VariableUpdater):
 
     def __init__(
         self,
-        force_key: str,
+        force_db_name: str,
         temperature: float,
         frix: float,
         units_force=ase.units.eV,
@@ -290,7 +290,7 @@ class LangevinDynamics(VariableUpdater):
         """
         Parameters
         ----------
-        force_key : str
+        force_db_name : str
             key which will correspond to the force on the modified Variable
             in the HIPNN model output dictionary
         temperature : float
@@ -309,7 +309,7 @@ class LangevinDynamics(VariableUpdater):
             used to set seed for reproducibility, by default None
         """
 
-        self.force_key = force_key
+        self.force_db_name = force_db_name
         self.force_factor = units_force / units_acc
         self.temperature = temperature
         self.frix = frix
@@ -346,7 +346,7 @@ class LangevinDynamics(VariableUpdater):
         model_outputs : dict
             dictionary of HIPNN model outputs
         """
-        self.variable.data["force"] = model_outputs[self.force_key].to(self.variable.device)
+        self.variable.data["force"] = model_outputs[self.force_db_name].to(self.variable.device)
 
         if len(self.variable.data["force"].shape) != len(self.variable.data["mass"].shape):
             self.variable.data["mass"] = self.variable.data["mass"][..., None]
