@@ -21,6 +21,17 @@ class Evaluator:
         self.loss = evaluation_loss
         self.loss_names = evaluation_loss_names
 
+        self.loss_larger_better = []
+        for i, node in enumerate(self.loss.nodes_to_compute):
+            try:
+                if node._larger_better:
+                    self.loss_larger_better.append(evaluation_loss_names[i])
+                else:
+                    pass
+            except AttributeError:
+                pass
+        print(self.loss_larger_better)
+
         self.n_inputs = len(model.input_nodes)
         self.n_outputs = len(model.nodes_to_compute)
         self.n_targets = len(evaluation_loss.input_nodes) - self.n_outputs

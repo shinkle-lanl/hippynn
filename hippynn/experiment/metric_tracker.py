@@ -30,11 +30,12 @@ class MetricTracker:
 
     """
 
-    def __init__(self, metric_names, stopping_key, quiet=False, split_names=("train", "valid", "test")):
+    def __init__(self, metric_names, stopping_key, larger_better=[], quiet=False, split_names=("train", "valid", "test")):
         """
 
         :param metric_names:
         :param stopping_key:
+        :param larger_better: list of items in `metric_names` in which a higher value is considered better
         :param quiet:
         :param split_names: splits to track.
         """
@@ -42,13 +43,14 @@ class MetricTracker:
             raise ValueError("Stopping key {} is not in metric names {}".format(stopping_key, metric_names))
         self.metric_names = metric_names
         self.stopping_key = stopping_key
+        self.larger_better = larger_better
 
         # metadata
         self.name_column_width = max(len(i) for i in self.metric_names)  # name column size
         self.n_metrics = len(metric_names)
 
         # State variables
-        self.best_metric_values = {split: {mtype: float("inf") for mtype in self.metric_names} for split in split_names}
+        self.best_metric_values = {split: {mtype: float("inf") if mtype not in self.larger_better else float("-inf") for mtype in self.metric_names} for split in split_names}
         self.other_metric_values = {}
         self.best_model = None
         self.epoch_times = []
@@ -78,7 +80,10 @@ class MetricTracker:
         better_metrics = {k: {} for k in self.best_metric_values}
         for split_type, typevals in metric_info.items():
             for mname, mval in typevals.items():
-                better = self.best_metric_values[split_type][mname] > mval
+                if mname in self.larger_better:
+                    better = self.best_metric_values[split_type][mname] < mval
+                else:
+                    better = self.best_metric_values[split_type][mname] > mval
                 if better:
                     self.best_metric_values[split_type][mname] = mval
                 better_metrics[split_type][mname] = better
