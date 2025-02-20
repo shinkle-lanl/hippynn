@@ -152,8 +152,8 @@ def neighbor_list_kdtree(cutoff, coords, cell):
     # have multiple images of the same point be within the cutoff distance of another point. The
     # current algorithm is unable to handle this. 
     cell_side_lengths = torch.sqrt(torch.diag(cell_prod))
-    if (cutoff/2 >= cell_side_lengths).any():
-        raise ValueError(f"Cutoff value ({cutoff}) must be less than half the shortest cell slide length ({cell_side_lengths.min()}).")
+    if (cutoff >= cell_side_lengths/2).any():
+        raise ValueError(f"Cutoff value ({cutoff}) must be less than half the shortest cell side length ({cell_side_lengths.min()}).")
     
     if torch.count_nonzero(cell - torch.diag(torch.diag(cell))):
         # Transform via isometry to a basis where cell is a diagonal matrix if it currently is not
