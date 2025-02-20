@@ -68,6 +68,7 @@ class Var(ReduceSingleNode, op=torch.var):
 
 class _BaseCompareLoss(SingleNode):
     _index_state = IdxType.Scalar
+    _larger_better = False
 
     def __init__(self, predicted, true):
         name = "{}({},{})".format(self._classname, predicted.name, true.name)
@@ -120,6 +121,8 @@ class RsqMod(torch.nn.Module):
 class Rsq(_BaseCompareLoss):
     torch_module = RsqMod()
     _classname = "Rsq"
+    _larger_better = True
+
 
 
 class MSELoss(_BaseCompareLoss, op=torch.nn.functional.mse_loss):
