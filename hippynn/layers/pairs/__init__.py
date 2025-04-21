@@ -15,8 +15,10 @@ from .indexing import (
     ExternalNeighbors,
     PairDeIndexer,
     PairReIndexer,
-    PairCacher,
-    PairUncacher,
+    OpenPairCacher,
+    OpenPairUncacher,
+    PeriodicPairCacher,
+    PeriodicPairUncacher,
     MolPairSummer,
     PaddedNeighModule,
 )

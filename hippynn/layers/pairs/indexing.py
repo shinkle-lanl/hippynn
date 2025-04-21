@@ -71,8 +71,37 @@ class MolPairSummer(torch.nn.Module):
         result.index_add_(0, pair_mol, pairfeatures)
         return result
 
+class OpenPairCacher(torch.nn.Module):
+    def __init__(self,):
+        super().__init__()
 
-class PairCacher(torch.nn.Module):
+    def forward(
+        self, pair_first, pair_second, real_atoms, mol_index, n_molecules, n_atoms_max
+    ):
+        # Set up absolute indices
+        abs_atoms = real_atoms % n_atoms_max
+        pfabs = abs_atoms[pair_first]
+        psabs = abs_atoms[pair_second]
+        mol = mol_index[pair_first]
+
+        # Reorder the indices
+        order = (psabs + n_atoms_max * (pfabs + n_atoms_max * mol))
+        order = torch.argsort(order)
+        mol = mol[order]
+        pfabs = pfabs[order]
+        psabs = psabs[order]
+
+        # Create sparse tensor
+        indices = torch.stack([mol, pfabs, psabs], dim=0)
+        values = torch.ones(indices.shape[1])
+        size = (n_molecules, n_atoms_max, n_atoms_max)
+        s = torch.sparse_coo_tensor(
+            indices=indices, values=values, size=size, dtype=torch.int, device=pair_first.device
+        )
+        s = s.coalesce()
+        return s
+
+class PeriodicPairCacher(torch.nn.Module):
     def __init__(self, n_images=1):
         super().__init__()
         self.set_images(n_images=n_images)
@@ -110,8 +139,33 @@ class PairCacher(torch.nn.Module):
         s = s.coalesce()
         return s
 
+class OpenPairUncacher(torch.nn.Module):
+    def __init__(self,):
+        super().__init__()
 
-class PairUncacher(torch.nn.Module):
+    def forward(self, sparse, coordinates, real_atoms, inv_real_atoms, n_atoms_max, n_molecules):
+
+        if not sparse.is_sparse:
+            sparse = sparse.to_sparse(sparse_dim=3)
+        sparse = sparse.coalesce()
+        index = sparse.indices()
+
+        mol, pfabs, psabs = index.unbind(0)
+        pfb = pfabs + mol * n_atoms_max
+        psb = psabs + mol * n_atoms_max
+
+        pair_first = inv_real_atoms[pfb]
+        pair_second = inv_real_atoms[psb]
+
+        atom_coordinates = coordinates.reshape(n_molecules * n_atoms_max, 3)[real_atoms]
+
+        paircoord = atom_coordinates[pair_first] - atom_coordinates[pair_second]
+
+        distflat = paircoord.norm(dim=1)
+
+        return distflat, pair_first, pair_second, paircoord,
+
+class PeriodicPairUncacher(torch.nn.Module):
     def __init__(self, n_images=1):
         super().__init__()
         self.set_images(n_images=n_images)

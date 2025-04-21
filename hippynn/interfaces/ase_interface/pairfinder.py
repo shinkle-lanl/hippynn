@@ -39,4 +39,4 @@ class ASEPairNode(_DispatchNeighbors):
 
 from ...experiment import assembly
 
-assembly._PAIRCACHE_COMPATIBLE_COMPUTERS.add(ASEPairNode)
+assembly._PERIODIC_PAIRCACHE_COMPATIBLE_COMPUTERS.add(ASEPairNode)

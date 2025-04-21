@@ -200,7 +200,42 @@ class PairDeIndexer(ExpandParents, AutoNoKw, SingleNode):
         super().__init__(name, parents, module=module, **kwargs)
 
 
-class PairCacher(ExpandParents, AutoKw, PairCache, SingleNode):
+class OpenPairCacher(ExpandParents, AutoKw, PairCache, SingleNode):
+    _input_names = (
+        "pair_first",
+        "pair_second",
+        "real_atoms",
+        "mol_index",
+        "n_atoms_max",
+        "n_molecules",
+    )
+    _auto_module_class = pairs_modules.OpenPairCacher
+    _index_state = IdxType.NotFound
+
+    @_parent_expander.match(PairIndexer)
+    def expand0(self, pair_indexer, *args, purpose, **kwargs):
+        atomidx = find_unique_relative(pair_indexer, AtomIndexer)
+        return pair_indexer, atomidx
+
+    @_parent_expander.match(PairIndexer, AtomIndexer)
+    def expand1(self, pair_indexer, atomidx, *args, purpose, **kwargs):
+        mi = atomidx.mol_index
+        nam = atomidx.n_atoms_max
+        n_molecules = atomidx.n_molecules
+        ra = atomidx.real_atoms
+        pf = pair_indexer.pair_first
+        ps = pair_indexer.pair_second
+        return pf, ps, ra, mi, n_molecules, nam
+
+    _parent_expander.assertlen(6)
+    _parent_expander.require_idx_states(IdxType.Pair, IdxType.Pair, None, None, None, None)
+
+    def __init__(self, name, parents, module="auto", module_kwargs=None, **kwargs):
+        self.module_kwargs = module_kwargs or {}
+        parents = self.expand_parents(parents)
+        super().__init__(name, parents, module=module, **kwargs)
+
+class PeriodicPairCacher(ExpandParents, AutoKw, PairCache, SingleNode):
     _input_names = (
         "pair_first",
         "pair_second",
@@ -211,7 +246,7 @@ class PairCacher(ExpandParents, AutoKw, PairCache, SingleNode):
         "n_atoms_max",
         "n_molecules",
     )
-    _auto_module_class = pairs_modules.PairCacher
+    _auto_module_class = pairs_modules.PeriodicPairCacher
     _index_state = IdxType.NotFound
 
     @_parent_expander.match(PairIndexer)
@@ -242,11 +277,39 @@ class PairCacher(ExpandParents, AutoKw, PairCache, SingleNode):
         super().__init__(name, parents, module=module, **kwargs)
 
 
-class PairUncacher(ExpandParents, AutoNoKw, PairIndexer, MultiNode):
+class OpenPairUncacher(ExpandParents, AutoNoKw, PairIndexer, MultiNode):
+    _input_names = "sparsepairs", "coordinates", "real_atoms", "inv_real_atoms", "n_atoms_max", "n_molecules"
+    _output_names = "pair_dist", "pair_first", "pair_second", "pair_coord",
+    _output_index_states = (IdxType.Pair,) * len(_output_names)
+    _auto_module_class = pairs_modules.OpenPairUncacher
+    _index_state = IdxType.NotFound
+
+    @_parent_expander.match(PairCache)
+    def expand0(self, sparse, *args, purpose, **kwargs):
+        pos = find_unique_relative(sparse, PositionsNode)
+        atomidx = find_unique_relative(sparse, AtomIndexer)
+        return sparse, pos, atomidx
+
+    @_parent_expander.match(PairCache, PositionsNode, AtomIndexer)
+    def expand1(self, sp, r, atomidx, *args, purpose, **kwargs):
+        ira = atomidx.inv_real_atoms
+        nam = atomidx.n_atoms_max
+        n_molecules = atomidx.n_molecules
+        ra = atomidx.real_atoms
+        return sp, r, ra, ira, nam, n_molecules
+
+    _parent_expander.assertlen(6)
+
+    def __init__(self, name, parents, dist_hard_max, module="auto", **kwargs):
+        self.dist_hard_max = dist_hard_max
+        parents = self.expand_parents(parents)
+        super().__init__(name, parents, module=module, **kwargs)
+
+class PeriodicPairUncacher(ExpandParents, AutoNoKw, PairIndexer, MultiNode):
     _input_names = "sparsepairs", "coordinates", "cells", "real_atoms", "inv_real_atoms", "n_atoms_max", "n_molecules"
     _output_names = "pair_dist", "pair_first", "pair_second", "pair_coord", "cell_offsets", "offset_index"
     _output_index_states = (IdxType.Pair,) * len(_output_names)
-    _auto_module_class = pairs_modules.PairUncacher
+    _auto_module_class = pairs_modules.PeriodicPairUncacher
     _index_state = IdxType.NotFound
 
     @_parent_expander.match(PairCache)
@@ -270,7 +333,6 @@ class PairUncacher(ExpandParents, AutoNoKw, PairIndexer, MultiNode):
         self.dist_hard_max = dist_hard_max
         parents = self.expand_parents(parents)
         super().__init__(name, parents, module=module, **kwargs)
-
 
 class RDFBins(ExpandParents, AutoKw, SingleNode):
     _input_names = "pair_dists", "pair_first", "pair_second", "one_hot", "n_molecules"

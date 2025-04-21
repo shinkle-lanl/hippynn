@@ -8,12 +8,37 @@ import numpy as np
 import torch
 from pathlib import Path
 
+from .. import settings
 from .restarter import NoRestart
 from ..tools import arrdict_len, device_fallback, unsqueeze_multiple
 
 from torch.utils.data import DataLoader, TensorDataset, Subset
 
 _AUTO_SPLIT_PREFIX = "split_mask_"
+
+def split_sparse(sparse_tensor, selected_indices):
+    print("start", flush=True)
+    indices = sparse_tensor._indices()  # shape: (ndim, nnz)
+    values = sparse_tensor._values()    # shape: (nnz,)
+
+    # Make a set for fast lookup
+    selected_set = set(selected_indices)
+
+    # Boolean mask: which columns of indices have first-dim index in selected_set
+    mask = torch.tensor([i.item() in selected_set for i in indices[0]])
+
+    # Filter indices and values
+    new_indices = indices[:, mask]
+    new_values = values[mask]
+
+    # Map old first-dim indices to new ones (e.g. [0, 3, 5] → [0, 1, 2])
+    index_remap = {old: new for new, old in enumerate(selected_indices)}
+    new_indices[0] = torch.tensor([index_remap[i.item()] for i in new_indices[0]])
+
+    # New size: shrink first dim
+    new_size = (len(selected_indices),) + sparse_tensor.size()[1:]
+    print("stop", flush=True)
+    return torch.sparse_coo_tensor(new_indices, new_values, new_size)
 
 
 class Database:
@@ -78,6 +103,19 @@ class Database:
         if not quiet:
             print(f"All arrays:")
             prettyprint_arrays(self.arr_dict)
+
+        try:
+            sparse_tensor = torch.sparse_coo_tensor(
+                self.arr_dict[settings.PAIRCACHE_DB_NAME + "_indices"],
+                self.arr_dict[settings.PAIRCACHE_DB_NAME + "_values"],
+                tuple(self.arr_dict[settings.PAIRCACHE_DB_NAME + "_size"]),
+            )
+            del self.arr_dict[settings.PAIRCACHE_DB_NAME + "_indices"]
+            del self.arr_dict[settings.PAIRCACHE_DB_NAME + "_values"]
+            del self.arr_dict[settings.PAIRCACHE_DB_NAME + "_size"]
+            self.arr_dict[settings.PAIRCACHE_DB_NAME] = sparse_tensor
+        except KeyError as e:
+            pass            
 
         try:
             _var_list = self.var_list
@@ -277,14 +315,18 @@ class Database:
         where_complement = torch.where(complement_mask)
 
         # Split off data, and keep the rest.
-        self.splits[split_name] = {k: self.arr_dict[k][where_index] for k in self.arr_dict}
+        self.splits[split_name] = {k: v[where_index] for k, v in self.arr_dict.items() if not v.is_sparse}
+        self.splits[split_name].update({k: v.to_dense()[where_index] for k, v in self.arr_dict.items() if v.is_sparse})
         if "split_indices" not in self.splits[split_name]:
             if not self.quiet:
                 print(f"Adding split indices for split: {split_name}")
             self.splits[split_name]["split_indices"] = torch.arange(len(split_indices), dtype=torch.int64)
 
         for k, v in self.arr_dict.items():
-            self.arr_dict[k] = v[where_complement]
+            if v.is_sparse:
+                self.arr_dict[k] = v.to_dense()[where_complement]
+            else:
+                self.arr_dict[k] = v[where_complement]
 
         if not self.quiet:
             print(f"Arrays for split: {split_name}")
@@ -353,7 +395,7 @@ class Database:
                 if mask_name in split:
                     # Check that the mask is correct and in the dict
                     old_mask = dict_to_add_to[sprime][mask_name]
-                    if (old_mask != mask).all():
+                    if torch.tensor(old_mask).to(mask.device).ne(mask).all():
                         raise ValueError(f"Mask in database did not match existing split structure: {mask_name} ")
                 else:
                     # if not present, write it.
@@ -636,7 +678,17 @@ class Database:
             )
 
         # get combined dictionary of arrays.
-        np_dict = {sname: {arr_name: array.to("cpu").numpy() for arr_name, array in split.items()} for sname, split in self.splits.items()}
+        np_dict = {}
+
+        for sname, split in self.splits.items():
+            np_dict[sname] = {}
+            for arr_name, array in split.items():
+                if arr_name == f"{settings.PAIRCACHE_DB_NAME}" and array.is_sparse:
+                    np_dict[sname][f"{settings.PAIRCACHE_DB_NAME}_indices"] = array._indices().cpu().numpy()
+                    np_dict[sname][f"{settings.PAIRCACHE_DB_NAME}_values"] = array._values().cpu().numpy()
+                    np_dict[sname][f"{settings.PAIRCACHE_DB_NAME}_size"] = array.size()
+                else:
+                    np_dict[sname][arr_name] = array.cpu().numpy()
 
         # insert split masks if requested.
 
@@ -649,8 +701,20 @@ class Database:
         keys = a_split.keys()
 
         for k in list(keys):
-            list_of_arrays = [split_dict[k] for split_dict in np_dict.values()]
-            arr_dict[k] = np.concatenate(list_of_arrays, axis=0)
+            if k == f"{settings.PAIRCACHE_DB_NAME}_indices":
+                all_indices = [split_dict[k] for split_dict in np_dict.values()]
+                arr_dict[k] = np.concatenate(all_indices, axis=1)  # indices: (ndim, total_nnz)
+
+            elif k == f"{settings.PAIRCACHE_DB_NAME}_size":
+                sizes = [split_dict[k] for split_dict in np_dict.values()]
+                arr_dict[k] = torch.Size((
+                    sum(s[0] for s in sizes),
+                    *[max(s[i] for s in sizes) for i in range(1, len(sizes[0]))]
+                ))
+
+            else:
+                list_of_arrays = [split_dict[k] for split_dict in np_dict.values()]
+                arr_dict[k] = np.concatenate(list_of_arrays, axis=0)
 
         # Put results where requested.
         if return_only:
@@ -855,8 +919,8 @@ def prettyprint_arrays(arr_dict: dict[str: torch.Tensor]):
     printrow("Name", "dtype", "shape")
     printline()
     for key, value in arr_dict.items():
-        if isinstance(value, torch.Tensor):
-            value = value.numpy()
+        # if isinstance(value, torch.Tensor):
+        #     value = value.numpy()
         printrow(key, repr(value.dtype), repr(value.shape))
     printline()
 

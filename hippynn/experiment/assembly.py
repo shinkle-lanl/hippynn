@@ -164,14 +164,14 @@ def assemble_for_training(train_loss, validation_losses, validation_names=None, 
     return TrainingModules(model, loss_assembled, evaluator), db_info
 
 
-_PAIRCACHE_DB_NAME = "AutoPrecomputedPairs"
 from ..graphs.nodes import pairs, indexers, base
 from ..graphs import Predictor, gops, inputs
+from .. import settings
 
-_PAIRCACHE_COMPATIBLE_COMPUTERS = {pairs.NumpyDynamicPairs, pairs.PeriodicPairIndexer, pairs.DynamicPeriodicPairs}
+_OPEN_PAIRCACHE_COMPATIBLE_COMPUTERS = {pairs.OpenPairIndexer}
+_PERIODIC_PAIRCACHE_COMPATIBLE_COMPUTERS = {pairs.NumpyDynamicPairs, pairs.PeriodicPairIndexer, pairs.DynamicPeriodicPairs}
 
-
-def precompute_pairs(model, database, batch_size=10, device=None, make_dense=False, n_images=1):
+def precompute_pairs(model, database, batch_size=10, device=None, make_dense=False, periodic=True, n_images=1):
     """
 
     :param model: Assembled GraphModule involving a PairIndexer
@@ -198,11 +198,20 @@ def precompute_pairs(model, database, batch_size=10, device=None, make_dense=Fal
 
     # nodes_to_compute,all_copies = gops.copy_subgraph(model.nodes_to_compute,assume_inputed=[])
     nodes_to_compute = model.nodes_to_compute
-    pair_indexer = find_unique_relative(
-        nodes_to_compute, lambda node: isinstance(node, tuple(_PAIRCACHE_COMPATIBLE_COMPUTERS))
-    )
+    if periodic:
+        pair_indexer = find_unique_relative(
+            nodes_to_compute, lambda node: isinstance(node, tuple(_PERIODIC_PAIRCACHE_COMPATIBLE_COMPUTERS))
+        )
+    else:
+        pair_indexer = find_unique_relative(
+            nodes_to_compute, lambda node: isinstance(node, tuple(_OPEN_PAIRCACHE_COMPATIBLE_COMPUTERS))
+        )
     dist_hard_max = pair_indexer.dist_hard_max
-    cacher = pairs.PairCacher("PairCacher", pair_indexer, module_kwargs=dict(n_images=n_images))
+
+    if periodic:
+        cacher = pairs.PeriodicPairCacher("PairCacher", pair_indexer, module_kwargs=dict(n_images=n_images))
+    else:
+        cacher = pairs.OpenPairCacher("PairCacher", pair_indexer)
 
     input_nodes = set([x for x in cacher.get_all_parents() if isinstance(x, base.InputNode)])
     pred = Predictor(input_nodes, [cacher], model_device=device, name="Pair Precomputer")
@@ -217,7 +226,7 @@ def precompute_pairs(model, database, batch_size=10, device=None, make_dense=Fal
                 cache = cache.to_dense()
             else:
                 cache = cache.coalesce()
-            database.splits[k][_PAIRCACHE_DB_NAME] = cache
+            database.splits[k][settings.PAIRCACHE_DB_NAME] = cache
     except RuntimeError as re:
         msg = re.args[0]
         if "size is inconsistent with indices" in msg:
@@ -225,13 +234,21 @@ def precompute_pairs(model, database, batch_size=10, device=None, make_dense=Fal
         else:
             raise re
 
-    cacheinput = inputs.PairIndices(db_name=_PAIRCACHE_DB_NAME)
+    cacheinput = inputs.PairIndices(db_name=settings.PAIRCACHE_DB_NAME)
     pos = gops.find_unique_relative(pair_indexer, inputs.PositionsNode)
-    cell = gops.find_unique_relative(pair_indexer, inputs.CellNode)
+    if periodic: cell = gops.find_unique_relative(pair_indexer, inputs.CellNode)
     atomidx = gops.find_unique_relative(pair_indexer, indexers.AtomIndexer)
-    uncacher = pairs.PairUncacher("AutoPairUncache",
-                                  (cacheinput, pos, cell, atomidx),
-                                  dist_hard_max=dist_hard_max)
+
+    if periodic:
+        parents = (cacheinput, pos, cell, atomidx)
+        uncacher = pairs.PeriodicPairUncacher("AutoPairUncache",
+                                    parents,
+                                    dist_hard_max=dist_hard_max)
+    else:
+        parents = (cacheinput, pos, atomidx)
+        uncacher = pairs.OpenPairUncacher("AutoPairUncache",
+                                    parents,
+                                    dist_hard_max=dist_hard_max)
     gops.replace_node(pair_indexer, uncacher, disconnect_old=True)
 
     return

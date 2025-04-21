@@ -118,6 +118,7 @@ DEFAULT_SETTINGS = {
     "WARN_LOW_DISTANCES": (True, bool_or_strtobool),
     "TIMEPLOT_AUTOSCALING": (True, bool_or_strtobool),
     "PYTORCH_GPU_MEM_FRAC": (1.0, float),
+    "PAIRCACHE_DB_NAME": ("AutoPrecomputedPairs", str),
 }
 
 INITIAL_SETTINGS = {k: handler(default) for k, (default, handler) in DEFAULT_SETTINGS.items()}
