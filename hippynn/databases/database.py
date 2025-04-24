@@ -2,10 +2,14 @@
 Base database functionality from dictionary of numpy arrays
 """
 
+import warnings
+import re
 from typing import Union
 import warnings
+from collections import defaultdict
 import numpy as np
 import torch
+from torch import Tensor
 from pathlib import Path
 
 from .. import settings
@@ -41,6 +45,81 @@ def split_sparse(sparse_tensor, selected_indices):
     return torch.sparse_coo_tensor(new_indices, new_values, new_size)
 
 
+def arr_dict_to_torch(input_dict):
+    result = {}
+    processed_prefixes = set()
+
+    # Identify all *_indices, *_values, *_size groups
+    keys = set(input_dict.keys())
+    for key in keys:
+        match = re.match(r'^(.*)_(indices|values|size)$', key)
+        if match:
+            prefix, suffix = match.groups()
+            if prefix in processed_prefixes:
+                continue
+
+            indices_key = f'{prefix}_indices'
+            values_key = f'{prefix}_values'
+            size_key = f'{prefix}_size'
+
+            if all(k in keys for k in [indices_key, values_key, size_key]):
+                indices = input_dict[indices_key]
+                values = input_dict[values_key]
+                size = input_dict[size_key]
+
+                # Convert to torch tensors if needed
+                if isinstance(indices, np.ndarray):
+                    indices = torch.from_numpy(indices)
+                if isinstance(values, np.ndarray):
+                    values = torch.from_numpy(values)
+                if isinstance(size, np.ndarray):
+                    size = tuple(size.tolist())
+                elif torch.is_tensor(size):
+                    size = tuple(size.tolist())
+                else:
+                    size = tuple(size)
+
+                sparse_tensor = torch.sparse_coo_tensor(indices, values, size)
+                result[prefix] = sparse_tensor.coalesce()
+                processed_prefixes.add(prefix)
+            else:
+                if prefix != "split":
+                    missing = [k for k in [indices_key, values_key, size_key] if k not in keys]
+                    warnings.warn(f"Missing keys for sparse tensor construction with prefix '{prefix}': {missing}")
+
+    # Handle all other entries
+    for key, value in input_dict.items():
+        if any(key.startswith(f'{p}_') for p in processed_prefixes):
+            continue  # already processed as part of a sparse tensor group
+        if isinstance(value, np.ndarray):
+            result[key] = torch.from_numpy(value)
+        elif torch.is_tensor(value):
+            result[key] = value
+        else:
+            warnings.warn(f"Key '{key}' has unsupported type {type(value)}, skipping.")
+
+    return result
+
+
+def arr_dict_to_numpy(input_dict):
+    result = {}
+
+    for key, tensor in input_dict.items():
+        if tensor.is_sparse:
+            tensor = tensor.coalesce()  # ensure it's coalesced
+            indices = tensor.indices().cpu().numpy()
+            values = tensor.values().cpu().numpy()
+            size = np.array(tensor.size())
+
+            result[f"{key}_indices"] = indices
+            result[f"{key}_values"] = values
+            result[f"{key}_size"] = size
+        else:
+            result[key] = tensor.cpu().numpy()
+
+    return result
+
+
 class Database:
     """
     Class for holding a pytorch dataset, splitting it, generating dataloaders, etc."
@@ -51,7 +130,7 @@ class Database:
         arr_dict: dict[str, torch.Tensor],
         inputs: list[str],
         targets: list[str],
-        seed: [int, np.random.RandomState, tuple, torch.Generator],
+        seed: Union[int, torch.Generator],
         test_size: Union[float, int] = None,
         valid_size: Union[float, int] = None,
         num_workers: int = 0,
@@ -66,9 +145,7 @@ class Database:
         :param arr_dict: dictionary mapping strings to numpy arrays
         :param inputs:   list of strings for input db_names
         :param targets:  list of strings for output db_namees
-        :param seed:     int, for random splitting, or "mask" for pre-split.
-            Can also be existing numpy.random.RandomState.
-            Can also be tuple from numpy.random.RandomState.get_state()
+        :param seed:     int, for random splitting, or torch.Generator
         :param test_size: fraction of data to use in test split
         :param valid_size: fraction of data to use in train split
         :param num_workers: passed to pytorch dataloaders
@@ -93,29 +170,12 @@ class Database:
         self.pin_memory = pin_memory
         self.auto_split = auto_split
 
-        self.arr_dict = {}
-        for k, v in arr_dict.items():
-            try:
-                self.arr_dict[k] = torch.as_tensor(v)
-            except Exception as e:
-                warnings.warn(f"Skipping key '{k}': could not convert to tensor ({type(v)}), reason: {e}")
 
+        self.arr_dict = arr_dict_to_torch(arr_dict)
+       
         if not quiet:
             print(f"All arrays:")
             prettyprint_arrays(self.arr_dict)
-
-        try:
-            sparse_tensor = torch.sparse_coo_tensor(
-                self.arr_dict[settings.PAIRCACHE_DB_NAME + "_indices"],
-                self.arr_dict[settings.PAIRCACHE_DB_NAME + "_values"],
-                tuple(self.arr_dict[settings.PAIRCACHE_DB_NAME + "_size"]),
-            )
-            del self.arr_dict[settings.PAIRCACHE_DB_NAME + "_indices"]
-            del self.arr_dict[settings.PAIRCACHE_DB_NAME + "_values"]
-            del self.arr_dict[settings.PAIRCACHE_DB_NAME + "_size"]
-            self.arr_dict[settings.PAIRCACHE_DB_NAME] = sparse_tensor
-        except KeyError as e:
-            pass            
 
         try:
             _var_list = self.var_list
@@ -151,22 +211,9 @@ class Database:
 
         if isinstance(seed, torch.Generator):
             self.random_state = seed
-            self._rng_type = "torch"
-        elif isinstance(seed, np.random.RandomState):
-            self.random_state = seed
-            self._rng_type = "numpy"
-        elif isinstance(seed, tuple):
-            self.random_state = np.random.RandomState()
-            self.random_state.set_state(seed)
-            self._rng_type = "numpy"
         else:
-            try:
-                self.random_state = torch.Generator()
-                self.random_state.manual_seed(seed)
-                self._rng_type = "torch"
-            except Exception: # np.random.RandomState is more permissive with input types than torch.manual_seed
-                self.random_state = np.random.RandomState(seed)
-                self._rng_type = "numpy"
+            self.random_state = torch.Generator()
+            self.random_state.manual_seed(seed)
 
         if self.auto_split:
             if test_size is not None or valid_size is not None:
@@ -247,14 +294,8 @@ class Database:
         if split_size < 1:
             split_size = int(split_size * len(self))
 
-        if self._rng_type == "torch":
-            perm = torch.randperm(len(self.arr_dict["indices"]), generator=self.random_state)
-            split_indices = self.arr_dict["indices"][perm[:split_size]]
-        elif self._rng_type == "numpy":
-            split_indices = self.random_state.choice(self.arr_dict["indices"], size=split_size, replace=False)
-            split_indices = torch.as_tensor(split_indices)
-        else:
-            raise ValueError("Unknown random state type.")
+        perm = torch.randperm(len(self.arr_dict["indices"]), generator=self.random_state)
+        split_indices = self.arr_dict["indices"][perm[:split_size]]
 
         split_indices.sort()
 
@@ -293,7 +334,7 @@ class Database:
         self.split_the_rest("train")
         return
 
-    def make_explicit_split(self, split_name:str, split_indices: torch.Tensor):
+    def make_explicit_split(self, split_name: str, split_indices: torch.Tensor):
         """
 
         :param split_name: name for split, typically 'train', 'valid', 'test'
@@ -309,24 +350,63 @@ class Database:
         index_mask = compute_index_mask(split_indices, self.arr_dict["indices"])
         complement_mask = ~index_mask
 
-        # Precompute the actual integer indices, because indexing with a boolean mask
-        # requires doing this, and we have to index with a boolean several times.
-        where_index = torch.where(index_mask)
-        where_complement = torch.where(complement_mask)
+        def index_sparse_tensor(tensor, mask):
+            """
+            Index a sparse tensor along dimension 0 using a boolean mask.
+            This function extracts the nonzero elements whose row (first dimension)
+            satisfies the mask and remaps the row indices for the new tensor.
+            """
+            # Extract the underlying sparse representation.
+            indices = tensor._indices()  # Shape: (ndim, nnz)
+            values = tensor._values()    # Shape: (nnz, ...)
+            
+            # Determine which nonzero entries belong to rows where mask is True.
+            selected = mask[indices[0]]
+            
+            # If no nonzero entries are selected, return an empty sparse tensor.
+            if selected.sum() == 0:
+                new_size = list(tensor.size())
+                new_size[0] = int(mask.sum().item())
+                empty_indices = torch.empty((indices.size(0), 0), dtype=torch.int64, device=indices.device)
+                empty_values = torch.empty((0,), dtype=values.dtype, device=values.device)
+                return torch.sparse_coo_tensor(empty_indices, empty_values, size=new_size)
+            
+            # Filter indices and values according to the selected mask.
+            new_indices = indices[:, selected]
+            new_values = values[selected]
+            
+            # Remap the row indices. For each row that is True in the mask,
+            # compute its new index by doing a cumulative sum over the mask.
+            mapping = torch.zeros_like(mask, dtype=torch.int64)
+            mapping[mask] = torch.arange(mask.sum(), device=mask.device)
+            new_indices[0] = mapping[new_indices[0]]
+            
+            # Update the size of the sparse tensor.
+            new_size = list(tensor.size())
+            new_size[0] = int(mask.sum().item())
+            return torch.sparse_coo_tensor(new_indices, new_values, size=new_size)
+
+        def index_tensor(tensor, mask):
+            """
+            Generic indexing along the first dimension using a boolean mask.
+            It handles both dense tensors and those in sparse COO format.
+            """
+            if tensor.is_sparse:
+                return index_sparse_tensor(tensor, mask)
+            else:
+                return tensor[mask]
+
+        # Create a split dictionary containing the selected tensors.
+        self.splits[split_name] = {k: index_tensor(v, index_mask) for k, v in self.arr_dict.items()}
 
         # Split off data, and keep the rest.
-        self.splits[split_name] = {k: v[where_index] for k, v in self.arr_dict.items() if not v.is_sparse}
-        self.splits[split_name].update({k: v.to_dense()[where_index] for k, v in self.arr_dict.items() if v.is_sparse})
         if "split_indices" not in self.splits[split_name]:
             if not self.quiet:
                 print(f"Adding split indices for split: {split_name}")
             self.splits[split_name]["split_indices"] = torch.arange(len(split_indices), dtype=torch.int64)
 
         for k, v in self.arr_dict.items():
-            if v.is_sparse:
-                self.arr_dict[k] = v.to_dense()[where_complement]
-            else:
-                self.arr_dict[k] = v[where_complement]
+            self.arr_dict[k] = index_tensor(v, complement_mask)
 
         if not self.quiet:
             print(f"Arrays for split: {split_name}")
@@ -528,6 +608,7 @@ class Database:
             shuffle=shuffle,
             pin_memory=self.pin_memory,
             num_workers=self.num_workers,
+            collate_fn=sparse_enabled_collate,
             **self.dataloader_kwargs,
         )
 
@@ -680,17 +761,23 @@ class Database:
         # get combined dictionary of arrays.
         np_dict = {}
 
-        for sname, split in self.splits.items():
-            np_dict[sname] = {}
-            for arr_name, array in split.items():
-                if arr_name == f"{settings.PAIRCACHE_DB_NAME}" and array.is_sparse:
-                    np_dict[sname][f"{settings.PAIRCACHE_DB_NAME}_indices"] = array._indices().cpu().numpy()
-                    np_dict[sname][f"{settings.PAIRCACHE_DB_NAME}_values"] = array._values().cpu().numpy()
-                    np_dict[sname][f"{settings.PAIRCACHE_DB_NAME}_size"] = array.size()
-                else:
-                    np_dict[sname][arr_name] = array.cpu().numpy()
+        def tensor_to_numpy_dict(name_prefix, tensor):
+            if tensor.is_sparse:
+                tensor = tensor.coalesce()
+                return {
+                    f"{name_prefix}_indices": tensor.indices().cpu().numpy(),
+                    f"{name_prefix}_values": tensor.values().cpu().numpy(),
+                    f"{name_prefix}_size": np.array(tensor.size())
+                }
+            else:
+                return {name_prefix: tensor.cpu().numpy()}
 
-        # insert split masks if requested.
+        for sname, split in self.splits.items():
+            split_np_dict = {}
+            for arr_name, array in split.items():
+                converted = tensor_to_numpy_dict(arr_name, array)
+                split_np_dict.update(converted)
+            np_dict[sname] = split_np_dict
 
         if record_split_masks:
             self.add_split_masks(dict_to_add_to=np_dict, split_prefix=split_prefix)
@@ -701,19 +788,19 @@ class Database:
         keys = a_split.keys()
 
         for k in list(keys):
-            if k == f"{settings.PAIRCACHE_DB_NAME}_indices":
-                all_indices = [split_dict[k] for split_dict in np_dict.values()]
-                arr_dict[k] = np.concatenate(all_indices, axis=1)  # indices: (ndim, total_nnz)
-
-            elif k == f"{settings.PAIRCACHE_DB_NAME}_size":
-                sizes = [split_dict[k] for split_dict in np_dict.values()]
-                arr_dict[k] = torch.Size((
-                    sum(s[0] for s in sizes),
-                    *[max(s[i] for s in sizes) for i in range(1, len(sizes[0]))]
-                ))
-
+            list_of_arrays = [split_dict[k] for split_dict in np_dict.values()]
+            m = re.match(r'^(.*)_(indices|values|size)$', k)
+            if m and (k != "split_indices"):
+                prefix, part = m.groups()
+                if part == "indices":
+                    arr_dict[k] = np.concatenate(list_of_arrays, axis=1)  # (ndim, total_nnz)
+                elif part == "values":
+                    arr_dict[k] = np.concatenate(list_of_arrays, axis=0)  # (total_nnz, ...)
+                elif part == "size":
+                    total_dim0 = sum(s[0] for s in list_of_arrays)
+                    rest_dims = [max(s[i] for s in list_of_arrays) for i in range(1, len(list_of_arrays[0]))]
+                    arr_dict[k] = np.array((total_dim0, *rest_dims))
             else:
-                list_of_arrays = [split_dict[k] for split_dict in np_dict.values()]
                 arr_dict[k] = np.concatenate(list_of_arrays, axis=0)
 
         # Put results where requested.
@@ -929,3 +1016,16 @@ class NamedTensorDataset(TensorDataset):
     def __init__(self, tensor_names, *tensors):
         super().__init__(*tensors)
         self.tensor_map = tensor_names
+
+
+collate_map = defaultdict(torch.utils.data.default_collate)
+
+def tensor_collate(list_of_tensors, collate_fn_map=None):
+    # if list_of_tensors.layout==torch.strided:
+    #     return default_collate(list_of_tensors)
+    return torch.stack(list_of_tensors,dim=0)
+
+collate_map[Tensor]= tensor_collate
+
+def sparse_enabled_collate(batch):
+    return torch.utils.data._utils.collate.collate(batch,collate_fn_map=collate_map)

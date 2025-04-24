@@ -11,6 +11,7 @@ Organized datasets for training and prediction.
 """
 from .database import Database
 from .ondisk import DirectoryDatabase, NPZDatabase
+from .networkx import NetworkXJSONDatabase
 has_ase = False
 has_h5 = False
 
@@ -28,7 +29,7 @@ if has_ase:
     if has_h5:
         from .h5_pyanitools import PyAniFileDB, PyAniDirectoryDB
 
-all_list = ["Database", "DirectoryDatabase", "NPZDatabase"]
+all_list = ["Database", "DirectoryDatabase", "NPZDatabase", "NetworkXJSONDatabase"]
 
 if has_ase:
     all_list += ["AseDatabase", "SNAPDirectoryDatabase"]

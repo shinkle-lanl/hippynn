@@ -96,7 +96,7 @@ class OpenPairCacher(torch.nn.Module):
         values = torch.ones(indices.shape[1])
         size = (n_molecules, n_atoms_max, n_atoms_max)
         s = torch.sparse_coo_tensor(
-            indices=indices, values=values, size=size, dtype=torch.int, device=pair_first.device
+            indices=indices, values=values, size=size, dtype=int, device=pair_first.device
         )
         s = s.coalesce()
         return s
@@ -134,7 +134,7 @@ class PeriodicPairCacher(torch.nn.Module):
         values = cell_offsets
         size = (n_molecules, n_atoms_max, n_atoms_max, n_offsets, 3)
         s = torch.sparse_coo_tensor(
-            indices=indices, values=values, size=size, dtype=torch.int, device=pair_first.device
+            indices=indices, values=values, size=size, dtype=int, device=pair_first.device
         )
         s = s.coalesce()
         return s
@@ -214,7 +214,7 @@ def padded_neighlist(pair_first, pair_second, pair_coord, atom_array):
     if pair_first.shape[0] == 0:  # empty neighbors list
         dev = pair_coord.device
         rijlist_pad = torch.empty((n_atoms, 0, 3), device=dev, dtype=pair_coord.dtype)
-        jlist_pad = torch.empty((n_atoms, 0), device=dev, dtype=torch.int64)
+        jlist_pad = torch.empty((n_atoms, 0), device=dev, dtype=int)
         return jlist_pad, rijlist_pad
 
     with torch.no_grad():
