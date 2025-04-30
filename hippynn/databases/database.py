@@ -18,7 +18,7 @@ from ..tools import arrdict_len, device_fallback, unsqueeze_multiple
 
 from torch.utils.data import DataLoader, TensorDataset, Subset
 
-_AUTO_SPLIT_PREFIX = "split_mask_"
+from collections import defaultdict
 
 def split_sparse(sparse_tensor, selected_indices):
     print("start", flush=True)
@@ -119,7 +119,6 @@ def arr_dict_to_numpy(input_dict):
 
     return result
 
-
 class Database:
     """
     Class for holding a pytorch dataset, splitting it, generating dataloaders, etc."
@@ -145,7 +144,7 @@ class Database:
         :param arr_dict: dictionary mapping strings to numpy arrays
         :param inputs:   list of strings for input db_names
         :param targets:  list of strings for output db_namees
-        :param seed:     int, for random splitting, or torch.Generator
+        :param seed:     int, for random splitting, or existing torch.Generator object
         :param test_size: fraction of data to use in test split
         :param valid_size: fraction of data to use in train split
         :param num_workers: passed to pytorch dataloaders
