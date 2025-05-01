@@ -92,7 +92,11 @@ def arr_dict_to_torch(input_dict):
         if any(key.startswith(f'{p}_') for p in processed_prefixes):
             continue  # already processed as part of a sparse tensor group
         if isinstance(value, np.ndarray):
-            result[key] = torch.from_numpy(value)
+            if value.dtype not in ['<U2', '<U38']:
+                print(type(value), value.dtype)
+                result[key] = torch.from_numpy(value)
+            else:
+                warnings.warn(f"Key '{key}' has unspported type NumPy array with dtype str_, skipping.")
         elif torch.is_tensor(value):
             result[key] = value
         else:
