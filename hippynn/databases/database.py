@@ -93,7 +93,6 @@ def arr_dict_to_torch(input_dict):
             continue  # already processed as part of a sparse tensor group
         if isinstance(value, np.ndarray):
             if value.dtype not in ['<U2', '<U38']:
-                print(type(value), value.dtype)
                 result[key] = torch.from_numpy(value)
             else:
                 warnings.warn(f"Key '{key}' has unspported type NumPy array with dtype str_, skipping.")

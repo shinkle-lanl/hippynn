@@ -471,6 +471,7 @@ def training_loop(
 
         for batch in tools.progress_bar(train_generator, desc="Training Batches", unit="batch"):
 
+            batch = [item.to_dense() if item.is_sparse else item for item in batch]
             batch = [item.to(device=device, non_blocking=True) for item in batch]
             batch_inputs = batch[:n_inputs]
             batch_targets = batch[-n_targets:]

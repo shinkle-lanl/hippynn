@@ -62,39 +62,43 @@ def load_json_graph(name, quiet=False):
 
 
 def to_tensor_with_correct_dtype(x):
-    # Handle PyTorch tensor
-    if isinstance(x, torch.Tensor):
-        if torch.is_floating_point(x):
-            return x.to(dtype=torch.get_default_dtype())
-        elif x.dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
-            return x.to(dtype=int)
-        else:
-            raise TypeError(f"Unsupported tensor dtype: {x.dtype}")
-
-    # Handle NumPy array
-    elif isinstance(x, np.ndarray):
-        if np.issubdtype(x.dtype, np.integer):
-            return torch.as_tensor(x, dtype=int)
-        elif np.issubdtype(x.dtype, np.floating):
-            return torch.as_tensor(x, dtype=torch.get_default_dtype())
-        else:
-            raise TypeError(f"Unsupported NumPy dtype: {x.dtype}")
-
-    # Handle nested lists
+    if isinstance(x, (np.ndarray, torch.Tensor)):
+        sample = x
     elif isinstance(x, (list, tuple)):
         sample = x[0]
         while isinstance(sample, (list, tuple)):
             sample = sample[0]
-
-        if isinstance(sample, (int, np.int64)):
-            return torch.tensor(x, dtype=int)
-        elif isinstance(sample, float):
-            return torch.tensor(x, dtype=torch.get_default_dtype())
-        else:
-            raise TypeError(f"Unsupported element type in list: {type(sample)}")
-
     else:
         raise TypeError(f"Input must be a tensor, NumPy array, or nested list, got: {type(x)}")
+
+    # Handle PyTorch tensor
+    if isinstance(sample, torch.Tensor):
+        if torch.is_floating_point(sample):
+            return x.to(dtype=torch.get_default_dtype())
+        elif sample.dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            return x.to(dtype=int)
+        else:
+            raise TypeError(f"Unsupported tensor dtype: {sample.dtype}")
+
+    # Handle NumPy array
+    elif isinstance(sample, np.ndarray):
+        if np.issubdtype(sample.dtype, np.integer):
+            return torch.as_tensor(np.array(x), dtype=int)
+        elif np.issubdtype(sample.dtype, np.floating):
+            return torch.as_tensor(np.array(x), dtype=torch.get_default_dtype())
+        else:
+            raise TypeError(f"Unsupported NumPy dtype: {x.dtype}")
+
+    # Handle nested lists
+    elif isinstance(sample, (int, np.int64)):
+        return torch.tensor(x, dtype=int)
+    elif isinstance(sample, float):
+        return torch.tensor(x, dtype=torch.get_default_dtype())
+
+    else:
+        raise TypeError(f"Unsupported element type in list: {type(sample)}")
+
+    
 
 
 def remap_nx_ids_sequential(G):
@@ -151,32 +155,70 @@ def nx_to_npz(graph: nx.Graph):
     return node_data, edge_data
 
 
-def pairs_values_to_sparse(pairs, values=None, max_n_atoms=None):
-    # Step 1: Build the indices list
-    indices = []
-    for frame_idx, pair_list in enumerate(pairs):
-        for i, j in pair_list:
-            indices.append([frame_idx, i, j])
 
-    # Step 2: Convert to tensor
-    indices = to_tensor_with_correct_dtype(indices).T  # shape: [3, N] where N is total number of pairs
-    if values is None: 
-        values = torch.ones(indices.shape[1], dtype=int)  # All values are 1
-    else:
-        values = to_tensor_with_correct_dtype(values)
+def normalize_input(pairs, values, default_value=1.0):
+    """
+    Normalize input pairs/values to flat tensors with shape (n, 3) and (n,)
+    """
+    if isinstance(pairs, (list, tuple)):
+        pair_list = []
+        value_list = []
+
+        for frame_idx, frame_pairs in enumerate(pairs):
+            p = to_tensor_with_correct_dtype(frame_pairs)
+            if p.shape[1] != 2:
+                raise ValueError("Each frame in pairs must have shape (n, 2)")
+            f = torch.full((p.shape[0], 1), frame_idx, dtype=torch.long, device=p.device)
+            p = torch.cat([f, p], dim=1)
+            pair_list.append(p)
+
+            if values is None:
+                v = torch.full((p.shape[0],), default_value, dtype=torch.float32, device=p.device)
+            else:
+                v = to_tensor_with_correct_dtype(values[frame_idx])
+            value_list.append(v)
+
         
-    # Step 3: Determine size
-    n_frames = len(pairs)
-    max_i = max(p[0] for frame in pairs for p in frame)
-    max_j = max(p[1] for frame in pairs for p in frame)
-    max_n_atoms = max_n_atoms or (max(max_i, max_j) + 1)
 
+        pairs_tensor = torch.cat(pair_list, dim=0)
+        values_tensor = torch.cat(value_list, dim=0)
+
+    else:
+        pairs_tensor = to_tensor_with_correct_dtype(pairs)
+        if pairs_tensor.shape[1] == 2:
+            f = torch.zeros((pairs_tensor.shape[0], 1), dtype=torch.long, device=pairs_tensor.device)
+            pairs_tensor = torch.cat([f, pairs_tensor], dim=1)
+
+        if values is None:
+            values_tensor = torch.full((pairs_tensor.shape[0],), default_value, dtype=torch.float32, device=pairs_tensor.device)
+        else:
+            values_tensor = to_tensor_with_correct_dtype(values)
+
+    return pairs_tensor, values_tensor
+
+def infer_sizes(pairs_tensor, max_n_atoms=None, n_frames=None):
+    """
+    Infer tensor shape (n_frames, max_n_atoms, max_n_atoms) if not given.
+    """
+    if max_n_atoms is None:
+        max_i = pairs_tensor[:, 1].max().item()
+        max_j = pairs_tensor[:, 2].max().item()
+        max_n_atoms = max(max_i, max_j) + 1
+
+    if n_frames is None:
+        n_frames = pairs_tensor[:, 0].max().item() + 1
+
+    return n_frames, max_n_atoms
+
+def pairs_values_to_sparse(pairs, values=None, max_n_atoms=None, n_frames=None):
+    """
+    Create a 3D sparse COO tensor (n_frames, max_n_atoms, max_n_atoms).
+    Accepts either a single array or a list of per-frame arrays.
+    """
+    pairs_tensor, values_tensor = normalize_input(pairs, values)
+    n_frames, max_n_atoms = infer_sizes(pairs_tensor, max_n_atoms, n_frames)
     size = (n_frames, max_n_atoms, max_n_atoms)
-
-    # Step 4: Create sparse tensor
-    sparse_tensor = torch.sparse_coo_tensor(indices, values, size)
-
-    return sparse_tensor
+    return torch.sparse_coo_tensor(pairs_tensor.t(), values_tensor, size=size)
 
 
 def array_list_to_padded_tensor(array_list, padding_value=0):
@@ -212,7 +254,6 @@ class NetworkXJSONDatabase(Database):
 
         arr_dict = self.load_files(directory, prefix, inputs, targets)
         super().__init__(arr_dict, inputs, targets, *args, **kwargs, quiet=quiet, allow_unfound=allow_unfound)
-
 
     def get_file_list(self, directory, prefix):
         try:
@@ -285,6 +326,8 @@ class NetworkXJSONDatabase(Database):
 
         node_data, edge_data = self.sort_by_key(node_data, edge_data, required_keys=(None if self.allow_unfound else var_list))
 
+        n_frames = len(graph_data)
+
         arr_dict = {}
 
         for key, value in node_data.items():
@@ -302,10 +345,10 @@ class NetworkXJSONDatabase(Database):
         for key, value in edge_data.items():
             try:
                 if key == "edges":
-                    arr_dict['edges'] = pairs_values_to_sparse(value, max_n_atoms=max_n_atoms)
+                    arr_dict['edges'] = pairs_values_to_sparse(value, max_n_atoms=max_n_atoms, n_frames=n_frames)
                 else:
-                    value = to_tensor_with_correct_dtype([val for sublist in value for val in sublist])
-                    arr_dict[key] = pairs_values_to_sparse(edge_data["edges"], value, max_n_atoms=max_n_atoms)
+                    # value = to_tensor_with_correct_dtype([val for sublist in value for val in sublist])
+                    arr_dict[key] = pairs_values_to_sparse(edge_data["edges"], value, max_n_atoms=max_n_atoms, n_frames=n_frames)
             except Exception as err:
                 msg = f"Failed to convert data for {key} to a tensor: {err}"
                 if self.allow_unfound:
