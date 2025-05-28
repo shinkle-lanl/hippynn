@@ -82,7 +82,9 @@ def to_tensor_with_correct_dtype(x):
 
     # Handle NumPy array
     elif isinstance(sample, np.ndarray):
-        if np.issubdtype(sample.dtype, np.integer):
+        if np.issubdtype(sample.dtype, np.bool_):
+            return torch.as_tensor(np.array(x, dtype=int), dtype=int)
+        elif np.issubdtype(sample.dtype, np.integer):
             return torch.as_tensor(np.array(x), dtype=int)
         elif np.issubdtype(sample.dtype, np.floating):
             return torch.as_tensor(np.array(x), dtype=torch.get_default_dtype())
