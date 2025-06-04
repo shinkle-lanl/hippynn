@@ -158,10 +158,7 @@ def nx_to_npz(graph: nx.Graph):
 
 
 
-def normalize_input(pairs, values, default_value=1.0):
-    """
-    Normalize input pairs/values to flat tensors with shape (n, 3) and (n,)
-    """
+def normalize_input(pairs, values, default_value=1):
     if isinstance(pairs, (list, tuple)):
         pair_list = []
         value_list = []
@@ -175,7 +172,7 @@ def normalize_input(pairs, values, default_value=1.0):
             pair_list.append(p)
 
             if values is None:
-                v = torch.full((p.shape[0],), default_value, dtype=torch.float32, device=p.device)
+                v = torch.full((p.shape[0],), default_value, dtype=int, device=p.device)
             else:
                 v = to_tensor_with_correct_dtype(values[frame_idx])
             value_list.append(v)
@@ -192,7 +189,7 @@ def normalize_input(pairs, values, default_value=1.0):
             pairs_tensor = torch.cat([f, pairs_tensor], dim=1)
 
         if values is None:
-            values_tensor = torch.full((pairs_tensor.shape[0],), default_value, dtype=torch.float32, device=pairs_tensor.device)
+            values_tensor = torch.full((pairs_tensor.shape[0],), default_value, dtype=int, device=pairs_tensor.device)
         else:
             values_tensor = to_tensor_with_correct_dtype(values)
 
