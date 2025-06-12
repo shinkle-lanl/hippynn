@@ -47,3 +47,13 @@ class EnsembleTarget(ExpandParents, AutoNoKw, MultiNode):
         super().__init__(name, parents, module=module)
         for c, out_name in zip(self.children, self._output_names):
             c.db_name = f'{db_name}_{out_name}'
+
+class ConcatenateNode(ExpandParents, AutoNoKw, SingleNode):
+    _auto_module_class = algebra_modules.ConcatenateModule
+    _input_names = NotImplemented  
+
+    _parent_expander.get_main_outputs()
+    _parent_expander.require_compatible_idx_states()
+
+    def __init__(self, name, parents, module="auto"):
+        super().__init__(name, parents=parents, module=module)

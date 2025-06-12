@@ -86,3 +86,7 @@ class EnsembleTarget(torch.nn.Module):
         mean = torch.mean(all, dim=1)
         std = torch.std(all, dim=1)
         return mean, std, all
+
+class ConcatenateModule(torch.nn.Module):
+    def forward(self, *input_tensors):
+        return torch.cat(input_tensors, dim=-1)
