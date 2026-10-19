@@ -16,6 +16,17 @@ class Gradient(torch.nn.Module):
     def forward(self, molecular_energies, positions):
         return self.sign * torch.autograd.grad(molecular_energies.sum(), positions, create_graph=True)[0]
         
+
+class Torque(torch.nn.Module):
+    """
+    Torque on each particle from the energy gradient dE/dR_i with respect to its orientation R_i.
+    With body axes u_k (the columns of R_i), tau_i = -sum_k u_k x dE/du_k.
+    """
+
+    def forward(self, orientations, orientation_grad):
+        return -torch.linalg.cross(orientations, orientation_grad, dim=-2).sum(dim=-1)
+
+
 class MultiGradient(torch.nn.Module):
     def __init__(self, signs):
         super().__init__()

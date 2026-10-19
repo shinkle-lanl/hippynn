@@ -17,6 +17,13 @@ class PositionsNode(Positions, InputNode):
     input_type_str = "Positions"
 
 
+class OrientationsNode(InputNode):
+    """Per-particle orientations, shape (n_systems, n_atoms, 3, 3); columns are body axes in the lab frame."""
+
+    index_state = IdxType.SysAtom
+    input_type_str = "Orientations"
+
+
 class CellNode(InputNode):
     index_state = IdxType.Systems
     input_type_str = "Cells"

@@ -35,6 +35,25 @@ class GradientNode(AutoKw, SingleNode):
         super().__init__(name, parents, sign=sign, **kwargs)
 
         
+
+class TorqueNode(AutoNoKw, SingleNode):
+    """
+    Compute the torque on each particle from the orientations, e.g. an
+    :class:`~hippynn.graphs.nodes.inputs.OrientationsNode`, and the energy gradient with
+    respect to them (sign +1), from a :class:`GradientNode` or :class:`MultiGradientNode`.
+    """
+
+    input_names = "orientations", "orientation_grad"
+    auto_module_class = physics_layers.Torque
+
+    def __init__(self, name, parents, **kwargs):
+        orientations, orientation_grad = parents
+        if getattr(orientation_grad, "sign", 1) != 1:
+            raise ValueError("TorqueNode requires the energy gradient (sign=+1), not its negative.")
+        self.index_state = orientations.index_state
+        super().__init__(name, (orientations, orientation_grad), **kwargs)
+
+
 class MultiGradientNode(AutoKw, MultiNode):
     """
     Compute the gradient of a quantity.

@@ -4,7 +4,7 @@ Nodes for physics transformations, charge moments, electrostatics, derivatives, 
 
 from .transforms import BondToMolSummmer, AtomToMolSummer, PerAtom, VecMag, CombineEnergyNode
 
-from .derivatives import GradientNode, MultiGradientNode, \
+from .derivatives import GradientNode, TorqueNode, MultiGradientNode, \
     HessianNode, HVPNode, HVPVectorNode, TrueHVPNode,\
     StressForceNode, StrainInducer, setup_stressforce_nodes
 
