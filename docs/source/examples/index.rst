@@ -24,6 +24,7 @@ For runnable example scripts, see `the examples at the hippynn github repository
     mliap_unified
     excited_states
     cheq
+    orientations
     weighted_loss
     lightning
     hyperopt
