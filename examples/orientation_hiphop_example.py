@@ -32,7 +32,7 @@ import numpy as np
 import torch
 
 import hippynn
-from hippynn.graphs import inputs, networks, targets, physics, loss
+from hippynn.graphs import inputs, networks, internal_variables, targets, physics, loss
 from hippynn.experiment import SetupParams, setup_and_train
 
 torch.manual_seed(0)
@@ -114,9 +114,9 @@ def train(name, use_orientations, train_on_torques=False):
     species = inputs.SpeciesNode(db_name="Z")
     positions = inputs.PositionsNode(db_name="R")
     if use_orientations:
-        # Adding the orientations as the last input turns on the orientation-dependent interactions.
+        # HipHopnnOrient takes the orientations as an extra input after the usual HIP-HOP-NN inputs.
         orientations = inputs.OrientationsNode(db_name="A")
-        network = networks.HipHopnn(name, (species, positions, orientations), module_kwargs=network_params)
+        network = internal_variables.HipHopnnOrient(name, (species, positions, orientations), module_kwargs=network_params)
     else:
         network = networks.HipHopnn(name, (species, positions), module_kwargs=network_params)
     energy = targets.HEnergyNode("HEnergy", network, db_name="E")

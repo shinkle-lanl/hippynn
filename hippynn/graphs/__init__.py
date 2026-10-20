@@ -16,7 +16,7 @@ from .nodes.base import find_unique_relative, find_relatives, get_connected_node
 
 from .gops import get_subgraph, copy_subgraph, replace_node, compute_evaluation_order
 
-from .nodes import networks, targets, physics, loss, excited
+from .nodes import networks, targets, physics, loss, excited, internal_variables
 
 # Needed to populate the registry of index transformers.
 # This has to happen before the indextypes package can work,

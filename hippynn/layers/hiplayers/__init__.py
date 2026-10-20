@@ -1,3 +1,4 @@
 from .sensitivity import SensitivityBottleneck, InverseSensitivityModule, GaussianSensitivityModule, CosCutoff
 from .tensors import TensorExtractor
-from .interactions import InteractLayer, InteractLayerVec, InteractLayerQuad, HOPInteractionLayer, HOPInteractionLayerOrient
+from .interactions import InteractLayer, InteractLayerVec, InteractLayerQuad, HOPInteractionLayer
+from .internal_variables import HOPInteractionLayerOrient

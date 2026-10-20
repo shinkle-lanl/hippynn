@@ -1,10 +1,11 @@
 """
-Tests for HIP-HOP-NN with optional per-particle orientations (HipHopnnOrientModule).
+Tests for HIP-HOP-NN with per-particle orientations (HipHopnnOrient).
 """
 import pytest
 import torch
 
-from hippynn.networks.hiphop import HipHopnnModule, HipHopnnOrientModule
+from hippynn.networks.hiphop import HipHopnnModule
+from hippynn.networks.internal_variables import HipHopnnOrientModule
 
 pytestmark = pytest.mark.filterwarnings("ignore:.*beta state.*")
 
@@ -52,19 +53,21 @@ def example_pairs(n_input_features):
 
 
 def make_energy_graph():
-    from hippynn.graphs import inputs, networks, targets, GraphModule
+    from hippynn.graphs import inputs, internal_variables, targets, GraphModule
 
     species = inputs.SpeciesNode(db_name="Z")
     positions = inputs.PositionsNode(db_name="R")
     orientations = inputs.OrientationsNode(db_name="A")
-    network = networks.HipHopnn("HIPHOP_orient", (species, positions, orientations), module_kwargs=NETWORK_PARAMS)
+    network = internal_variables.HipHopnnOrient(
+        "HIPHOP_orient", (species, positions, orientations), module_kwargs=NETWORK_PARAMS
+    )
     energy = targets.HEnergyNode("E", network)
     graph = GraphModule([species, positions, orientations], [energy.system_energy]).to(torch.float64)
     return graph, network.torch_module
 
 
-def test_orientations_parent_selects_module():
-    from hippynn.graphs import inputs, networks, IdxType
+def test_build_node():
+    from hippynn.graphs import inputs, networks, internal_variables, IdxType
 
     species = inputs.SpeciesNode(db_name="Z")
     positions = inputs.PositionsNode(db_name="R")
@@ -72,11 +75,8 @@ def test_orientations_parent_selects_module():
     orientations = inputs.OrientationsNode(db_name="A")
 
     plain = networks.HipHopnn("plain", (species, positions), module_kwargs=NETWORK_PARAMS)
-    assert type(plain.torch_module) is HipHopnnModule
-    assert "orientations" not in plain.input_names
-
     for parents in [(species, positions, orientations), (species, positions, cell, orientations)]:
-        net = networks.HipHopnn("orient", parents, module_kwargs=NETWORK_PARAMS, periodic=cell in parents)
+        net = internal_variables.HipHopnnOrient("orient", parents, module_kwargs=NETWORK_PARAMS, periodic=cell in parents)
         assert type(net.torch_module) is HipHopnnOrientModule
         assert net.orientations.index_state == IdxType.Atoms
         assert net.input_names == (*plain.input_names, "orientations")
@@ -163,13 +163,15 @@ def test_differentiable():
 
 
 def test_torque():
-    from hippynn.graphs import inputs, networks, targets, physics, GraphModule
+    from hippynn.graphs import inputs, internal_variables, targets, physics, GraphModule
 
     torch.manual_seed(0)
     species = inputs.SpeciesNode(db_name="Z")
     positions = inputs.PositionsNode(db_name="R")
     orientations = inputs.OrientationsNode(db_name="A")
-    network = networks.HipHopnn("HIPHOP_orient", (species, positions, orientations), module_kwargs=NETWORK_PARAMS)
+    network = internal_variables.HipHopnnOrient(
+        "HIPHOP_orient", (species, positions, orientations), module_kwargs=NETWORK_PARAMS
+    )
     energy = targets.HEnergyNode("E", network)
     # Forces and orientation gradients from a single backward pass.
     gradients = physics.MultiGradientNode("gradients", energy.system_energy, (positions, orientations), signs=(-1, 1))

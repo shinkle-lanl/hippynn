@@ -50,8 +50,8 @@ New Features:
 - Additional example for multi-fidelity training
 - Additional example for knowledge distillation
 - Added classical charge equilibration methods and associated examples
-- ``HipHopnn`` accepts an optional ``OrientationsNode`` input for particles with
-  orientations (e.g. ellipsoids); HIP-HOP interactions are then modulated by the relative
+- Added ``HipHopnnOrient`` network and ``OrientationsNode`` input for particles with
+  orientations (e.g. ellipsoids); HIP-HOP interactions are modulated by the relative
   orientation R_i^T R_j of each pair.
 - Added ``TorqueNode`` for torques on particles with orientations, usable in training losses.
 

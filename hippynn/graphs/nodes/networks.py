@@ -7,8 +7,8 @@ from .base.multi import IndexNode
 from .indexers import OneHotEncoder, PaddingIndexer, acquire_encoding_padding
 from .pairs import OpenPairIndexer, PeriodicPairIndexer, SparsePairIndexer
 from .tags import PairIndexer
-from .inputs import SpeciesNode, PositionsNode, CellNode, OrientationsNode
-from ..indextypes import IdxType, index_type_coercion
+from .inputs import SpeciesNode, PositionsNode, CellNode
+from ..indextypes import IdxType
 from ... import networks as network_modules
 
 
@@ -148,25 +148,5 @@ class HipnnQuad(HipnnVec):
 class HipHopnn(HipnnVec):
     """
     Node for HIP-HOP_NN neural network.
-
-    Optionally, an :class:`~hippynn.graphs.nodes.inputs.OrientationsNode` of per-particle
-    orientations may be given as the last parent, e.g. ``(species, positions, orientations)``. The
-    network then also uses the relative orientation of each pair (see
-    :class:`~hippynn.networks.hiphop.HipHopnnOrientModule`).
     """
     auto_module_class = network_modules.hiphop.HipHopnnModule
-
-    def __init__(self, name, parents, *args, **kwargs):
-        if isinstance(parents, (tuple, list)) and isinstance(parents[-1], OrientationsNode):
-            # Instance attributes, set before AutoKw builds the module.
-            self.auto_module_class = network_modules.hiphop.HipHopnnOrientModule
-            self.input_names = (*self.input_names, "orientations")
-        super().__init__(name, parents, *args, **kwargs)
-
-    def expand_parents(self, parents, **kwargs):
-        if "orientations" not in self.input_names:
-            return super().expand_parents(parents, **kwargs)
-        *parents, orientations = parents
-        parents = super().expand_parents(tuple(parents), **kwargs)
-        orientations = index_type_coercion(orientations.main_output, IdxType.Atoms, hints=parents)
-        return (*parents, orientations)

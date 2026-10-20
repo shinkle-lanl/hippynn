@@ -1,8 +1,8 @@
 Oriented Particles
 ==================
 
-HIP-HOP-NN (:class:`~hippynn.graphs.nodes.networks.HipHopnn`) accepts an optional orientations input for
-particles such as rigid ellipsoids. Each particle's orientation (its reference frame) R_i is a 3x3 rotation
+:class:`~hippynn.graphs.nodes.internal_variables.HipHopnnOrient` extends HIP-HOP-NN to particles with
+orientations, such as rigid ellipsoids. Each particle's orientation (its reference frame) R_i is a 3x3 rotation
 matrix whose columns are the particle's body axes in the lab frame. It follows the spin extension of HIP-NN,
 which modulates the interaction kernel with the bond variable S_i . S_j. Here, the full relative orientation
 Q_ij = R_i^T R_j is used instead; its nine entries are the dot products between the axes of particle i and
@@ -23,12 +23,14 @@ v_ab(r_ij, Q_ij) = sum_nu s_nu(r_ij) [ V0_{nu,ab} + sum_{alpha,beta} V^(alpha,be
 
 Example::
 
+    from hippynn.graphs import inputs, internal_variables, targets, physics
+
     species = inputs.SpeciesNode(db_name="Z")
     positions = inputs.PositionsNode(db_name="R")
     orientations = inputs.OrientationsNode(db_name="A")  # shape (n_systems, n_atoms, 3, 3)
 
     network_params.update({"l_max": 2, "n_max": 3})
-    network = networks.HipHopnn("hiphop_orient", (species, positions, orientations), module_kwargs=network_params)
+    network = internal_variables.HipHopnnOrient("hiphop_orient", (species, positions, orientations), module_kwargs=network_params)
     henergy = targets.HEnergyNode("HEnergy", network)
 
     # Forces and the orientation gradient from a single backward pass.
@@ -44,10 +46,9 @@ orientation (sign +1), where u_k are the body axes (columns of R_i). Only these 
 if only torques are needed. With a ``db_name``, torques can be added to the training loss in the same way
 as forces, e.g. ``loss.MSELoss.of_node(torque)``.
 
-Passing an :class:`~hippynn.graphs.nodes.inputs.OrientationsNode` as the last parent selects the
-orientation-dependent module, :class:`~hippynn.networks.hiphop.HipHopnnOrientModule`; without it, the node
-builds standard HIP-HOP-NN. The choice is made when the model is built, since the orientation weights are
-part of the model.
+``HipHopnnOrient`` accepts the same parents and options as ``HipHopnn``, followed by an
+:class:`~hippynn.graphs.nodes.inputs.OrientationsNode`, and builds
+:class:`~hippynn.networks.internal_variables.HipHopnnOrientModule`.
 
 ``examples/orientation_hiphop_example.py`` trains HIP-HOP-NN without orientations, with orientations, and
 with orientations plus torque training on the same synthetic data, and compares them on the test set.
