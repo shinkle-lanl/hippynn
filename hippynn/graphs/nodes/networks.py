@@ -8,7 +8,7 @@ from .indexers import OneHotEncoder, PaddingIndexer, acquire_encoding_padding
 from .pairs import OpenPairIndexer, PeriodicPairIndexer, SparsePairIndexer
 from .tags import PairIndexer
 from .inputs import SpeciesNode, PositionsNode, CellNode
-from ..indextypes import IdxType
+from ..indextypes import IdxType, index_type_coercion
 from ... import networks as network_modules
 
 
@@ -18,6 +18,22 @@ class DefaultNetworkExpansion(ExpandParents):
         "species_set": "possible_species",
         "periodic": "periodic",
         }
+
+    # Index states of extra trailing parents (e.g. per-atom orientations), which are held out of the
+    # default expansion and appended, coerced to these states, after the expanded parents.
+    trailing_idx_states = ()
+
+    def expand_parents(self, parents, **kwargs):
+        n_trailing = len(self.trailing_idx_states)
+        if not n_trailing:
+            return super().expand_parents(parents, **kwargs)
+        parents, trailing = tuple(parents[:-n_trailing]), parents[-n_trailing:]
+        parents = super().expand_parents(parents, **kwargs)
+        trailing = tuple(
+            index_type_coercion(t.main_output, idx_state, hints=parents)
+            for t, idx_state in zip(trailing, self.trailing_idx_states)
+        )
+        return (*parents, *trailing)
 
     @parent_expander.match(SpeciesNode, PositionsNode)
     @parent_expander.match(SpeciesNode, PositionsNode, CellNode)
